@@ -1,0 +1,11 @@
+# Secrets -- never commit the real credentials file
+credentials.py
+
+# MicroPython compiled output
+*.mpy
+
+# macOS
+.DS_Store
+
+# CPython bytecode from running test_competition.py on a PC
+__pycache__/
