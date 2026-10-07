@@ -265,6 +265,42 @@ def test_bad_json_and_unknown_commands_are_survivable():
           events == [] and comp.running is False, events)
 
 
+def test_connection_lost_during_a_run_stops_the_robot():
+    """The broker drops mid-run: on_stop must fire once, not never."""
+    comp, events = new_comp()
+    send(comp, ROBOT_CMD, {"cmd": "START", "run_id": 5})
+    events.clear()
+
+    def broken():
+        raise OSError(104)      # ECONNRESET, as umqtt raises it
+    comp._client.check_msg = broken
+    comp.poll()
+
+    check("on_stop is called by the library", events == [("STOP", 5)], events)
+    check("running is cleared", comp.running is False)
+    check("stop_reason is 'disconnected'", comp.stop_reason == "disconnected",
+          comp.stop_reason)
+
+    # After reconnecting, the server's STOP for the same run is a duplicate.
+    comp._client = _FakeMQTTClient(MAC, "x", 1883, "u", "p", 60)
+    send(comp, ROBOT_CMD, {"cmd": "STOP", "run_id": 5, "reason": "timeout"})
+    check("a later STOP for the same run does not fire on_stop again",
+          events == [("STOP", 5)], events)
+
+    # The next run starts normally.
+    send(comp, ROBOT_CMD, {"cmd": "START", "run_id": 6})
+    check("the next START works", comp.running is True and events[-1] == ("START", 6),
+          events)
+
+
+def test_connection_lost_while_idle_fires_nothing():
+    comp, events = new_comp()
+    comp._client.check_msg = lambda: (_ for _ in ()).throw(OSError(104))
+    comp.poll()
+    check("no callback when no run was active", events == [], events)
+    check("stop_reason untouched", comp.stop_reason is None, comp.stop_reason)
+
+
 def main():
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

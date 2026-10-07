@@ -31,7 +31,7 @@ from umqtt.simple import MQTTClient
 
 #: Reported to the server in every heartbeat and PONG, and shown in the
 #: organiser device console. Bump it when you change this file.
-FIRMWARE_VERSION = "1.1.0"
+FIRMWARE_VERSION = "1.1.1"
 
 _HEARTBEAT_MS = 30_000
 _RECONNECT_WAIT_MS = 5_000
@@ -129,9 +129,11 @@ class Competition:
 
     @property
     def stop_reason(self):
-        """Why the last run ended: 'finished', 'timeout', or None if a judge
-        voided it by hand. Useful for a status LED -- 'finished' means the lap
-        timer saw the final crossing, 'timeout' means the run ran out of time.
+        """Why the last run ended: 'finished', 'timeout', 'disconnected', or
+        None if a judge voided it by hand. Useful for a status LED -- 'finished'
+        means the lap timer saw the final crossing, 'timeout' means the run ran
+        out of time, 'disconnected' means the robot lost its connection to the
+        competition server during the run (on_stop was called by the library).
         """
         return self._stop_reason
 
@@ -182,7 +184,7 @@ class Competition:
         except Exception as exc:
             print("[Competition] MQTT error:", repr(exc))
             self._client = None
-            self._running = False   # safety: clear active state on disconnect
+            self._connection_lost()   # safety: stop the run on disconnect
 
     def run(self):
         """
@@ -197,6 +199,30 @@ class Competition:
             time.sleep_ms(20)
 
     # ── Private ─────────────────────────────────────────────────
+
+    def _connection_lost(self):
+        """The broker connection broke. If a run was active, end it here.
+
+        Without a connection the robot can no longer hear STOP, so it must not
+        keep driving. Clearing `running` alone is not enough: the motor driver
+        keeps its last command, and a program that stops its motors only in
+        on_stop() would drive on. So the library calls on_stop() itself, once,
+        with stop_reason 'disconnected'. A STOP for the same run that arrives
+        after reconnecting is then recognised as a duplicate and ignored.
+        """
+        was_running = self._running
+        self._running = False
+        if not was_running:
+            return
+        run_id = self._current_run_id
+        self._stop_reason = "disconnected"
+        self._last_command = ("STOP", run_id)
+        print("[Competition] Connection lost during run_id=%s -- stopping" % run_id)
+        if self._stop_cb:
+            try:
+                self._stop_cb(run_id)
+            except Exception as exc:
+                print("[Competition] on_stop error:", repr(exc))
 
     def _wifi_connect(self):
         wlan = network.WLAN(network.STA_IF)

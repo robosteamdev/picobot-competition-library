@@ -161,8 +161,9 @@ claim your robot** — see "Claiming your robot" below.
 ### `comp.stop_reason` (property)
 
 Why the last run ended: `"finished"` (the lap timer saw the final crossing),
-`"timeout"` (the run ran out of time), or `None` (a judge stopped it by hand).
-Handy for a status LED. Cleared on the next START.
+`"timeout"` (the run ran out of time), `"disconnected"` (the robot lost its
+connection to the competition server during the run), or `None` (a judge stopped
+it by hand). Handy for a status LED. Cleared on the next START.
 
 ### `comp.bound_to_team` (property)
 
@@ -211,7 +212,7 @@ The library answers a `PING` automatically with:
 
 ```json
 {"device_id": "AA:BB:CC:DD:EE:FF", "cmd": "PONG",
- "nonce": "9c302b032ef6458c", "firmware": "1.1.0"}
+ "nonce": "9c302b032ef6458c", "firmware": "1.1.1"}
 ```
 
 The nonce must be echoed back **unchanged** — the server drops a reply it does
@@ -225,6 +226,13 @@ Full protocol: `docs/MQTT_PROTOCOL.md` in <https://github.com/robosteamdev/robos
 ## Important notes
 
 - **Never report timing** — the lap timer hardware is the clock, not the robot.
+- **A lost connection ends the run.** If the connection to the competition server
+  breaks during a run, the robot can no longer hear STOP. The library then sets
+  `running` to `False` and calls your `on_stop` callback itself (once), with
+  `stop_reason == "disconnected"`. The motor driver keeps its last command, so
+  stop the motors in `on_stop` — and, to be safe, whenever `comp.running` is
+  `False` in your main loop. A STOP for the same run that arrives after the
+  reconnect is ignored as a duplicate.
 - **Claim and bind your robot before the event** (see above), or it will start
   during other teams' runs.
 - `credentials.py` is gitignored. Never commit it.
